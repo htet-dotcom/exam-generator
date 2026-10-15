@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="my">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>မေးခွန်းစာစောင် ထုတ်စက်</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Padauk:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar no-print">
+    <h1>📘 မေးခွန်းစာစောင် ထုတ်စက်</h1>
+    <nav>
+      <button class="tab active" data-tab="bank">① မေးခွန်းဘဏ်</button>
+      <button class="tab" data-tab="generate">② မေးခွန်းထုတ်</button>
+      <button class="tab" data-tab="check">③ အဖြေစစ်</button>
+      <button class="tab" data-tab="settings">⚙ ဆက်တင်</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ① Question bank -->
+    <section id="tab-bank" class="panel active">
+      <div class="card no-print">
+        <h2>မေးခွန်း + အဖြေ ဓာတ်ပုံ တင်ရန်</h2>
+        <p class="hint">စာအုပ်/မေးခွန်းဟောင်း ဓာတ်ပုံများ (မေးခွန်းနှင့် အဖြေ) ကို ရွေးပါ။ အဖြေက သီးခြားစာမျက်နှာမှာ ရှိရင်လည်း အတူတူ တင်ပါ။ AI က မေးခွန်းတိုင်းကို အခန်း၊ အမှတ်၊ ခက်ခဲမှုအလိုက် ခွဲပြီး မေးခွန်းဘဏ်ထဲ ထည့်ပေးပါမယ်။</p>
+        <div class="row">
+          <label>ဘာသာရပ် <input id="subject" placeholder="ဥပမာ - ဓာတုဗေဒ Grade 10"></label>
+        </div>
+        <label class="drop" id="bankDrop">
+          <input type="file" id="bankFiles" accept="image/*" multiple>
+          <span>📷 ဓာတ်ပုံများ ရွေးရန် (သို့) ဒီနေရာကို ဆွဲထည့်ပါ</span>
+        </label>
+        <div id="bankPreview" class="thumbs"></div>
+        <button id="extractBtn" class="primary">🔍 မေးခွန်းများ ထုတ်ယူမည်</button>
+        <div id="bankStatus" class="status"></div>
+      </div>
+
+      <div class="card">
+        <div class="row between">
+          <h2>မေးခွန်းဘဏ် <span id="bankCount" class="badge">0</span></h2>
+          <div class="row no-print">
+            <button id="exportBank">⬇ JSON သိမ်း</button>
+            <label class="btn">⬆ JSON ဖွင့် <input type="file" id="importBank" accept=".json" hidden></label>
+            <button id="clearBank" class="danger">🗑 အားလုံးဖျက်</button>
+          </div>
+        </div>
+        <div id="bankSummary" class="summary"></div>
+        <div class="row no-print">
+          <input id="bankFilter" placeholder="🔎 ရှာရန်...">
+        </div>
+        <div class="table-wrap"><table id="bankTable"></table></div>
+      </div>
+    </section>
+
+    <!-- ② Generate -->
+    <section id="tab-generate" class="panel">
+      <div class="card no-print">
+        <h2>အမြန်ထုတ်</h2>
+        <div class="row">
+          <button class="preset primary" data-total="100">💯 ၁၀၀ မှတ်ဖိုး</button>
+          <button class="preset primary" data-total="50">5️⃣0️⃣ ၅၀ မှတ်ဖိုး</button>
+          <label>အခြား <input id="customTotal" type="number" min="1" style="width:6em"></label>
+          <button class="preset" data-total="custom">ထုတ်</button>
+        </div>
+        <div class="row">
+          <label>ခက်ခဲမှု
+            <select id="presetLevel">
+              <option value="mixed">ရောနှော (လွယ် → ခက်)</option>
+              <option value="easy">လွယ်</option>
+              <option value="medium">အလယ်အလတ်</option>
+              <option value="hard">ခက်</option>
+            </select>
+          </label>
+          <label>အခန်းများ <select id="presetChapters" multiple size="3"></select></label>
+        </div>
+      </div>
+
+      <div class="card no-print">
+        <h2>Command ဖြင့်ထုတ်</h2>
+        <p class="hint">ဥပမာ – <code>အခန်း ၁ က ၅ မှတ်ဖိုး ၂ ပုဒ်၊ အခန်း ၃ က ၁၀ မှတ်ဖိုး ခက်ခက် ၁ ပုဒ်၊ အခန်း ၂ က ၂ မှတ်ဖိုး လွယ်လွယ် ၅ ပုဒ်</code></p>
+        <textarea id="command" rows="3" placeholder="ဘယ်အခန်းက ဘယ်နှစ်မှတ်ဖိုး ဘယ်နှစ်ပုဒ် လိုချင်လဲ ရေးပါ..."></textarea>
+        <button id="commandBtn" class="primary">⚡ Command နဲ့ ထုတ်မည်</button>
+      </div>
+
+      <div class="card no-print">
+        <h2>ကိုယ်တိုင် သတ်မှတ်ထုတ်</h2>
+        <table id="blueprint"></table>
+        <div class="row">
+          <button id="addRow">＋ အတန်းထည့်</button>
+          <button id="blueprintBtn" class="primary">📝 ထုတ်မည်</button>
+          <span id="blueprintTotal" class="hint"></span>
+        </div>
+      </div>
+
+      <div id="genStatus" class="status no-print"></div>
+
+      <div id="paperCard" class="card hidden">
+        <div class="row between no-print">
+          <input id="paperTitle" class="title-input">
+          <div class="row">
+            <label><input type="checkbox" id="showAnswers"> အဖြေပါပြ</label>
+            <button id="reshuffle">🔀 ပြန်ရွေး</button>
+            <button id="savePaper" class="primary">💾 သိမ်း</button>
+            <button onclick="window.print()">🖨 Print</button>
+          </div>
+        </div>
+        <div id="paper" class="paper"></div>
+      </div>
+
+      <div class="card no-print">
+        <h2>သိမ်းထားသော မေးခွန်းစာစောင်များ</h2>
+        <ul id="savedPapers" class="list"></ul>
+      </div>
+    </section>
+
+    <!-- ③ Check -->
+    <section id="tab-check" class="panel">
+      <div class="card no-print">
+        <h2>ကျောင်းသား အဖြေလွှာ စစ်ရန်</h2>
+        <div class="row">
+          <label>မေးခွန်းစာစောင် <select id="checkPaper"></select></label>
+          <label>ကျောင်းသားအမည် <input id="studentName"></label>
+        </div>
+        <label class="drop" id="checkDrop">
+          <input type="file" id="checkFiles" accept="image/*" multiple>
+          <span>📷 အဖြေလွှာ ဓာတ်ပုံများ ရွေးရန်</span>
+        </label>
+        <div id="checkPreview" class="thumbs"></div>
+        <button id="checkBtn" class="primary">✅ အဖြေစစ်မည်</button>
+        <div id="checkStatus" class="status"></div>
+      </div>
+      <div id="resultCard" class="card hidden">
+        <div class="row between no-print">
+          <h2>ရလဒ်</h2>
+          <button onclick="window.print()">🖨 Print</button>
+        </div>
+        <div id="result" class="paper"></div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="tab-settings" class="panel">
+      <div class="card">
+        <h2>ဆက်တင်</h2>
+        <p class="hint">ဓာတ်ပုံဖတ်ခြင်းနှင့် အဖြေစစ်ခြင်းအတွက် Claude API key လိုပါတယ်။ <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> မှာ ယူနိုင်ပါတယ်။ Key ကို ဒီ browser ထဲမှာသာ သိမ်းပြီး Anthropic API ဆီကိုသာ ပို့ပါတယ်။</p>
+        <label>API Key <input id="apiKey" type="password" placeholder="sk-ant-..." style="width:100%"></label>
+        <label>Model
+          <select id="model">
+            <option value="claude-opus-5-5">Claude Opus 5.5 (အတိကျဆုံး)</option>
+            <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (မြန်/သက်သာ)</option>
+            <option value="claude-haiku-5-5">Claude Haiku 5.5 (အသက်သာဆုံး)</option>
+          </select>
+        </label>
+        <button id="saveSettings" class="primary">💾 သိမ်းမည်</button>
+        <span id="settingsStatus" class="hint"></span>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
