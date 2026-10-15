@@ -16,6 +16,10 @@
       <button class="tab" data-tab="generate">② မေးခွန်းထုတ်</button>
       <button class="tab" data-tab="check">③ အဖြေစစ်</button>
       <button class="tab" data-tab="settings">⚙ ဆက်တင်</button>
+      <select id="quickProvider" title="AI ပြောင်းရန်">
+        <option value="claude">🤖 Claude</option>
+        <option value="gemini">✨ Gemini</option>
+      </select>
     </nav>
   </header>
 
@@ -143,16 +147,51 @@
     <!-- Settings -->
     <section id="tab-settings" class="panel">
       <div class="card">
-        <h2>ဆက်တင်</h2>
-        <p class="hint">ဓာတ်ပုံဖတ်ခြင်းနှင့် အဖြေစစ်ခြင်းအတွက် Claude API key လိုပါတယ်။ <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> မှာ ယူနိုင်ပါတယ်။ Key ကို ဒီ browser ထဲမှာသာ သိမ်းပြီး Anthropic API ဆီကိုသာ ပို့ပါတယ်။</p>
-        <label>API Key <input id="apiKey" type="password" placeholder="sk-ant-..." style="width:100%"></label>
-        <label>Model
-          <select id="model">
-            <option value="claude-opus-5-5">Claude Opus 5.5 (အတိကျဆုံး)</option>
-            <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (မြန်/သက်သာ)</option>
-            <option value="claude-haiku-5-5">Claude Haiku 5.5 (အသက်သာဆုံး)</option>
-          </select>
-        </label>
+        <h2>သုံးမည့် AI</h2>
+        <div class="row">
+          <label><input type="radio" name="provider" value="claude"> 🤖 Claude (Anthropic)</label>
+          <label><input type="radio" name="provider" value="gemini"> ✨ Gemini (Google)</label>
+        </div>
+        <p class="hint">Key တွေကို ဒီ browser ထဲမှာသာ သိမ်းပြီး သက်ဆိုင်ရာ AI ကုမ္ပဏီဆီကိုသာ ပို့ပါတယ်။ Key တစ်ကြောင်းကို တစ်ခုစီ ထည့်ပါ။ Key တစ်ခု limit ပြည့်ရင် (သို့) အလုပ်မလုပ်ရင် နောက် key ကို အလိုအလျောက် ပြောင်းသုံးပါမယ်။</p>
+      </div>
+
+      <div class="card" id="cfg-claude">
+        <h2>🤖 Claude</h2>
+        <p class="hint">Key ကို <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> မှာ ယူပါ (<code>sk-ant-...</code>)။</p>
+        <textarea id="keys-claude" rows="3" placeholder="sk-ant-...&#10;sk-ant-... (နောက်ထပ် key)" spellcheck="false"></textarea>
+        <div class="row">
+          <label>Model
+            <select id="model-claude">
+              <option value="claude-opus-5-5">Claude Opus 5.5 (အတိကျဆုံး)</option>
+              <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (မြန်/သက်သာ)</option>
+              <option value="claude-haiku-5-5">Claude Haiku 5.5 (အသက်သာဆုံး)</option>
+            </select>
+          </label>
+          <button class="testKeys" data-p="claude">🔌 Key စမ်း</button>
+        </div>
+        <div id="test-claude" class="status"></div>
+      </div>
+
+      <div class="card" id="cfg-gemini">
+        <h2>✨ Gemini</h2>
+        <p class="hint">Key ကို <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> မှာ အခမဲ့ ယူနိုင်ပါတယ် (<code>AIza...</code>)။ အခမဲ့ key မှာ အသုံးပြုနိုင်တဲ့ အကြိမ်ရေ ကန့်သတ်ချက် ရှိလို့ key အများကြီး ထည့်ထားနိုင်ပါတယ်။</p>
+        <textarea id="keys-gemini" rows="3" placeholder="AIza...&#10;AIza... (နောက်ထပ် key)" spellcheck="false"></textarea>
+        <div class="row">
+          <label>Model
+            <select id="model-gemini">
+              <option value="gemini-3.8-flash">Gemini 3.8 Flash (အကြံပြု)</option>
+              <option value="gemini-4-argon">Gemini 4 Argon (အတိကျဆုံး)</option>
+              <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+              <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (အမြန်ဆုံး/သက်သာ)</option>
+            </select>
+          </label>
+          <button id="loadGeminiModels">🔄 Model စာရင်းယူ</button>
+          <button class="testKeys" data-p="gemini">🔌 Key စမ်း</button>
+        </div>
+        <div id="test-gemini" class="status"></div>
+      </div>
+
+      <div class="card">
         <button id="saveSettings" class="primary">💾 သိမ်းမည်</button>
         <span id="settingsStatus" class="hint"></span>
       </div>

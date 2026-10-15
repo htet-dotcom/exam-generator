@@ -2,10 +2,20 @@ import Anthropic from "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.131.0/+e
 
 // ---------- state & storage ----------
 const LS = {
-  bank: "qb.bank", papers: "qb.papers", key: "qb.apiKey", model: "qb.model", subject: "qb.subject",
+  bank: "qb.bank", papers: "qb.papers", subject: "qb.subject", provider: "qb.provider",
+  keys: (p) => `qb.keys.${p}`, model: (p) => `qb.model.${p}`, keyIndex: (p) => `qb.keyIndex.${p}`,
 };
 const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { alert("သိမ်းမရပါ: " + e.message); } };
+
+// Carry over settings from the first version (single Claude key).
+if (localStorage.getItem("qb.apiKey") && !localStorage.getItem(LS.keys("claude"))) {
+  save(LS.keys("claude"), [load("qb.apiKey", "")].filter(Boolean));
+  save(LS.model("claude"), load("qb.model", "claude-opus-5-5"));
+  localStorage.removeItem("qb.apiKey");
+  localStorage.removeItem("qb.model");
+}
+const DEFAULT_MODEL = { claude: "claude-opus-5-5", gemini: "gemini-3.8-flash" };
 
 let bank = load(LS.bank, []);
 let papers = load(LS.papers, []);
@@ -38,48 +48,219 @@ $$(".tab").forEach((t) => t.addEventListener("click", () => {
 }));
 
 // ---------- settings ----------
-$("#apiKey").value = load(LS.key, "");
-$("#model").value = load(LS.model, "claude-opus-5-5");
+const getProvider = () => load(LS.provider, "claude");
+const getKeys = (p) => load(LS.keys(p), []);
+const getModel = (p) => load(LS.model(p), DEFAULT_MODEL[p]);
+const parseKeys = (text) => [...new Set(text.split(/[\s,]+/).map((k) => k.trim()).filter(Boolean))];
+
+function ensureOption(sel, value) {
+  if (value && ![...sel.options].some((o) => o.value === value)) sel.add(new Option(value, value));
+  sel.value = value;
+}
+function renderSettings() {
+  const p = getProvider();
+  $$("input[name=provider]").forEach((r) => (r.checked = r.value === p));
+  $("#quickProvider").value = p;
+  for (const prov of ["claude", "gemini"]) {
+    $(`#keys-${prov}`).value = getKeys(prov).join("\n");
+    ensureOption($(`#model-${prov}`), getModel(prov));
+    $(`#cfg-${prov}`).style.borderColor = prov === p ? "var(--primary)" : "";
+  }
+}
+function setProvider(p) {
+  save(LS.provider, p);
+  renderSettings();
+}
+$$("input[name=provider]").forEach((r) => r.addEventListener("change", () => setProvider(r.value)));
+$("#quickProvider").addEventListener("change", (e) => {
+  setProvider(e.target.value);
+  if (!getKeys(e.target.value).length) $(".tab[data-tab=settings]").click();
+});
+$("#saveSettings").addEventListener("click", () => {
+  for (const p of ["claude", "gemini"]) {
+    save(LS.keys(p), parseKeys($(`#keys-${p}`).value));
+    save(LS.model(p), $(`#model-${p}`).value);
+    save(LS.keyIndex(p), 0);
+  }
+  renderSettings();
+  const p = getProvider();
+  $("#settingsStatus").textContent = `✔ သိမ်းပြီးပါပြီ — ${p === "claude" ? "Claude" : "Gemini"} ကို သုံးပါမယ် (key ${my(getKeys(p).length)} ခု)`;
+});
 $("#subject").value = load(LS.subject, "");
 $("#subject").addEventListener("change", () => save(LS.subject, $("#subject").value));
-$("#saveSettings").addEventListener("click", () => {
-  save(LS.key, $("#apiKey").value.trim());
-  save(LS.model, $("#model").value);
-  $("#settingsStatus").textContent = "✔ သိမ်းပြီးပါပြီ";
+
+$$(".testKeys").forEach((b) => b.addEventListener("click", async () => {
+  const p = b.dataset.p, out = $(`#test-${p}`);
+  const keys = parseKeys($(`#keys-${p}`).value);
+  if (!keys.length) return setStatus(out, "Key ထည့်ပါ", true);
+  b.disabled = true;
+  setStatus(out, "⏳ စမ်းနေပါတယ်...");
+  const lines = [];
+  for (const key of keys) {
+    const masked = key.slice(0, 8) + "…" + key.slice(-4);
+    try {
+      await PROVIDERS[p].test(key);
+      lines.push(`✔ ${masked} — အလုပ်လုပ်ပါတယ်`);
+    } catch (e) {
+      lines.push(`✖ ${masked} — ${errorText(e)}`);
+    }
+  }
+  setStatus(out, lines.join("\n"), lines.some((l) => l.startsWith("✖")));
+  b.disabled = false;
+}));
+
+$("#loadGeminiModels").addEventListener("click", async () => {
+  const out = $("#test-gemini"), key = parseKeys($("#keys-gemini").value)[0];
+  if (!key) return setStatus(out, "Key အရင်ထည့်ပါ", true);
+  try {
+    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": key } });
+    const data = await geminiJson(res);
+    const sel = $("#model-gemini"), current = sel.value;
+    const models = (data.models || []).filter((m) => m.name.includes("gemini") && (m.supportedGenerationMethods || []).includes("generateContent"));
+    sel.innerHTML = models.map((m) => `<option value="${esc(m.name.replace("models/", ""))}">${esc(m.displayName || m.name)}</option>`).join("");
+    ensureOption(sel, current);
+    setStatus(out, `✔ Model ${my(models.length)} ခု ရပါပြီ`);
+  } catch (e) {
+    setStatus(out, "✖ " + errorText(e), true);
+  }
 });
 
-// ---------- Claude ----------
-async function askClaude({ system, content, schema, maxTokens = 32000 }) {
-  const apiKey = load(LS.key, "");
-  if (!apiKey) throw new Error("⚙ ဆက်တင်မှာ API Key အရင်ထည့်ပါ");
-  const model = load(LS.model, "claude-opus-5-5");
-  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
-  const params = {
-    model,
-    max_tokens: maxTokens,
-    system,
-    messages: [{ role: "user", content }],
-    output_config: { effort: "high", format: { type: "json_schema", schema } },
-  };
-  if (model !== "claude-haiku-5-5") {
-    // Re-route automatically if a safety classifier declines the request.
-    params.betas = ["server-side-fallback-2026-07-01"];
-    params.fallbacks = "default";
-  }
-  const msg = await client.beta.messages.stream(params).finalMessage();
-  if (msg.stop_reason === "refusal") throw new Error("AI က ဒီတောင်းဆိုမှုကို ငြင်းပယ်ခဲ့ပါတယ်");
-  if (msg.stop_reason === "max_tokens") throw new Error("အဖြေရှည်လွန်းပါတယ် — ဓာတ်ပုံအရေအတွက် လျှော့ပြီး ထပ်စမ်းပါ");
-  const text = msg.content.filter((b) => b.type === "text").map((b) => b.text).join("");
-  return JSON.parse(text);
+// ---------- AI providers ----------
+// Every provider takes the same request: { system, images: [{mime, data}], text, schema, maxTokens }
+// and returns the parsed JSON object. Errors carry `.kind`: "auth" | "quota" | "other".
+class AIError extends Error {
+  constructor(message, kind = "other") { super(message); this.kind = kind; }
 }
 
-function apiErrorText(e) {
-  if (e instanceof Anthropic.AuthenticationError) return "API Key မှားနေပါတယ်";
-  if (e instanceof Anthropic.RateLimitError) return "ခဏနားပြီးမှ ထပ်စမ်းပါ (rate limit)";
-  if (e instanceof Anthropic.APIConnectionError) return "အင်တာနက် ချိတ်ဆက်မှု မရပါ";
-  if (e instanceof Anthropic.APIError) return `API error ${e.status ?? ""}: ${e.message}`;
-  return e.message || String(e);
+const PROVIDERS = {
+  claude: {
+    async call(key, model, req) {
+      const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true, maxRetries: 1 });
+      const params = {
+        model,
+        max_tokens: req.maxTokens,
+        system: req.system,
+        messages: [{
+          role: "user",
+          content: [
+            ...req.images.map((i) => ({ type: "image", source: { type: "base64", media_type: i.mime, data: i.data } })),
+            { type: "text", text: req.text },
+          ],
+        }],
+        output_config: { effort: "high", format: { type: "json_schema", schema: req.schema } },
+      };
+      if (model !== "claude-haiku-5-5") {
+        // Re-route automatically if a safety classifier declines the request.
+        params.betas = ["server-side-fallback-2026-07-01"];
+        params.fallbacks = "default";
+      }
+      let msg;
+      try {
+        msg = await client.beta.messages.stream(params).finalMessage();
+      } catch (e) {
+        if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) throw new AIError("API Key မှားနေပါတယ် (သို့) ခွင့်မရှိပါ", "auth");
+        if (e instanceof Anthropic.RateLimitError) throw new AIError("Key ရဲ့ အသုံးပြုနိုင်မှု limit ပြည့်နေပါတယ်", "quota");
+        if (e instanceof Anthropic.BadRequestError && /credit balance/i.test(e.message)) throw new AIError("Key မှာ credit မကျန်တော့ပါ", "quota");
+        if (e instanceof Anthropic.APIConnectionError) throw new AIError("အင်တာနက် ချိတ်ဆက်မှု မရပါ");
+        if (e instanceof Anthropic.APIError) throw new AIError(`Claude API error ${e.status ?? ""}: ${e.message}`);
+        throw e;
+      }
+      if (msg.stop_reason === "refusal") throw new AIError("AI က ဒီတောင်းဆိုမှုကို ငြင်းပယ်ခဲ့ပါတယ်");
+      if (msg.stop_reason === "max_tokens") throw new AIError("အဖြေရှည်လွန်းပါတယ် — ဓာတ်ပုံအရေအတွက် လျှော့ပြီး ထပ်စမ်းပါ");
+      return parseJson(msg.content.filter((b) => b.type === "text").map((b) => b.text).join(""));
+    },
+    async test(key) {
+      const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true, maxRetries: 0 });
+      try {
+        await client.models.list({ limit: 1 });
+      } catch (e) {
+        if (e instanceof Anthropic.AuthenticationError) throw new AIError("Key မှားနေပါတယ်", "auth");
+        throw new AIError(e.message);
+      }
+    },
+  },
+
+  gemini: {
+    async call(key, model, req) {
+      const body = {
+        system_instruction: {
+          parts: [{ text: `${req.system}\n\nRespond with a single JSON object only (no markdown), matching this JSON Schema exactly:\n${JSON.stringify(req.schema)}` }],
+        },
+        contents: [{
+          role: "user",
+          parts: [
+            ...req.images.map((i) => ({ inline_data: { mime_type: i.mime, data: i.data } })),
+            { text: req.text },
+          ],
+        }],
+        generationConfig: { response_mime_type: "application/json" },
+      };
+      let res;
+      try {
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+          body: JSON.stringify(body),
+        });
+      } catch {
+        throw new AIError("အင်တာနက် ချိတ်ဆက်မှု မရပါ");
+      }
+      const data = await geminiJson(res);
+      if (data.promptFeedback?.blockReason) throw new AIError(`Gemini က ပိတ်ပင်ခဲ့ပါတယ် (${data.promptFeedback.blockReason})`);
+      const cand = data.candidates?.[0];
+      if (!cand) throw new AIError("Gemini ဆီက အဖြေ မရပါ");
+      if (cand.finishReason === "MAX_TOKENS") throw new AIError("အဖြေရှည်လွန်းပါတယ် — ဓာတ်ပုံအရေအတွက် လျှော့ပြီး ထပ်စမ်းပါ");
+      if (cand.finishReason && !["STOP", "FINISH_REASON_UNSPECIFIED"].includes(cand.finishReason)) {
+        throw new AIError(`Gemini အဖြေ မပြည့်စုံပါ (${cand.finishReason})`);
+      }
+      const text = (cand.content?.parts || []).filter((p) => p.text && !p.thought).map((p) => p.text).join("");
+      return parseJson(text);
+    },
+    async test(key) {
+      const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1", { headers: { "x-goog-api-key": key } });
+      await geminiJson(res);
+    },
+  },
+};
+
+async function geminiJson(res) {
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) return data;
+  const msg = data.error?.message || res.statusText;
+  const reason = JSON.stringify(data.error?.details || "");
+  if (res.status === 429 || data.error?.status === "RESOURCE_EXHAUSTED") throw new AIError("Key ရဲ့ အသုံးပြုနိုင်မှု limit ပြည့်နေပါတယ်", "quota");
+  if (res.status === 401 || res.status === 403 || /API_KEY_INVALID|API key not valid/i.test(reason + msg)) throw new AIError("Key မှားနေပါတယ် (သို့) ခွင့်မရှိပါ", "auth");
+  if (res.status === 404) throw new AIError(`Model မတွေ့ပါ — ⚙ မှာ 🔄 Model စာရင်းယူ ပြီး ပြန်ရွေးပါ (${msg})`);
+  throw new AIError(`Gemini API error ${res.status}: ${msg}`);
 }
+
+function parseJson(text) {
+  const t = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, "");
+  try { return JSON.parse(t); } catch { throw new AIError("AI ရဲ့ အဖြေကို နားမလည်ပါ — ထပ်စမ်းကြည့်ပါ"); }
+}
+
+// Try the active key first; on a bad or exhausted key, move to the next one.
+async function askAI({ system, images = [], text, schema, maxTokens = 32000 }) {
+  const p = getProvider(), keys = getKeys(p), model = getModel(p);
+  const name = p === "claude" ? "Claude" : "Gemini";
+  if (!keys.length) throw new AIError(`⚙ ဆက်တင်မှာ ${name} API Key အရင်ထည့်ပါ`);
+  const start = load(LS.keyIndex(p), 0) % keys.length;
+  const failures = [];
+  for (let n = 0; n < keys.length; n++) {
+    const i = (start + n) % keys.length;
+    try {
+      const out = await PROVIDERS[p].call(keys[i], model, { system, images, text, schema, maxTokens });
+      save(LS.keyIndex(p), i);
+      return out;
+    } catch (e) {
+      if (!(e instanceof AIError) || e.kind === "other") throw e;
+      failures.push(`key ${my(i + 1)}: ${e.message}`);
+    }
+  }
+  throw new AIError(`${name} key အားလုံး အသုံးမပြုနိုင်ပါ —\n${failures.join("\n")}`);
+}
+
+const errorText = (e) => e.message || String(e);
 
 // ---------- images ----------
 async function toImageBlock(file) {
@@ -91,7 +272,7 @@ async function toImageBlock(file) {
   canvas.height = Math.round(img.height * scale);
   canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
   const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-  return { type: "image", source: { type: "base64", media_type: "image/jpeg", data: dataUrl.split(",")[1] } };
+  return { mime: "image/jpeg", data: dataUrl.split(",")[1] };
 }
 
 function setupDrop(dropSel, inputSel, previewSel, onFiles) {
@@ -163,9 +344,10 @@ $("#extractBtn").addEventListener("click", async () => {
       setStatus(st, `⏳ ဓာတ်ပုံ ${my(i + 1)}–${my(i + files.length)} / ${my(bankImages.length)} ကို ဖတ်နေပါတယ်... (မိနစ်အနည်းငယ် ကြာနိုင်ပါတယ်)`);
       const blocks = await Promise.all(files.map(toImageBlock));
       const subject = $("#subject").value.trim();
-      const res = await askClaude({
+      const res = await askAI({
         system: EXTRACT_SYSTEM,
-        content: [...blocks, { type: "text", text: `Subject: ${subject || "(not given)"}\nExtract every question with its answer from these ${files.length} photo(s).` }],
+        images: blocks,
+        text: `Subject: ${subject || "(not given)"}\nExtract every question with its answer from these ${files.length} photo(s).`,
         schema: EXTRACT_SCHEMA,
         maxTokens: 64000,
       });
@@ -182,7 +364,7 @@ $("#extractBtn").addEventListener("click", async () => {
     }
     setStatus(st, `✔ မေးခွန်း ${my(added)} ပုဒ် ထည့်ပြီးပါပြီ${skipped ? `（ထပ်နေသော ${my(skipped)} ပုဒ် ကျော်ခဲ့သည်）` : ""}။ အောက်က ဇယားမှာ အခန်း/အမှတ်/ခက်ခဲမှု ကို စစ်ပြီး ပြင်နိုင်ပါတယ်။`);
   } catch (e) {
-    setStatus(st, "✖ " + apiErrorText(e), true);
+    setStatus(st, "✖ " + errorText(e), true);
   } finally {
     btn.disabled = false;
   }
@@ -450,9 +632,9 @@ $("#commandBtn").addEventListener("click", async () => {
       }).filter(Boolean).join("\n");
       return `chapter "${c}" (${t || "untitled"}):\n${detail}`;
     }).join("\n");
-    const plan = await askClaude({
+    const plan = await askAI({
       system: "You turn a teacher's exam request (usually in Burmese, with Burmese or Arabic digits) into selection rules over an existing question bank. Use only chapter ids and marks values that exist in the inventory. 'လွယ်' = easy, 'အလယ်' = medium, 'ခက်' = hard. If the teacher only asks for a total (e.g. ၁၀၀ မှတ်ဖိုး) without per-chapter counts, return empty rows and set total. If the teacher names chapters together with a total only, set total and put one row per chapter with count 0 so those chapters are used.",
-      content: [{ type: "text", text: `Question bank inventory (counts per difficulty):\n${inventory}\n\nTeacher's request:\n${cmd}` }],
+      text: `Question bank inventory (counts per difficulty):\n${inventory}\n\nTeacher's request:\n${cmd}`,
       schema: COMMAND_SCHEMA,
       maxTokens: 8000,
     });
@@ -472,7 +654,7 @@ $("#commandBtn").addEventListener("click", async () => {
     }
     run();
   } catch (e) {
-    setStatus(st, "✖ " + apiErrorText(e), true);
+    setStatus(st, "✖ " + errorText(e), true);
   } finally {
     btn.disabled = false;
   }
@@ -551,7 +733,7 @@ $("#checkBtn").addEventListener("click", async () => {
     const items = orderedSections(paper.questions).flatMap((s) => s.items);
     const key = items.map((q) => `### Question ${q.no} (${q.marks} marks)\nQuestion: ${q.question}\nModel answer: ${q.answer || "(no model answer in source — judge from subject knowledge and say so in feedback)"}`).join("\n\n");
     const blocks = await Promise.all(checkImages.map(toImageBlock));
-    const res = await askClaude({
+    const res = await askAI({
       system: `You are a fair, careful exam marker. The photos are a student's handwritten answer sheet (often in Burmese). Mark it against the answer key, which comes from the official source material.
 - Read the student's handwriting carefully; match answers to question numbers as the student labeled them.
 - Award marks for each question from 0 up to its maximum, in steps of 0.5. Give partial credit for answers that contain correct key points from the model answer, even if worded differently.
@@ -559,14 +741,15 @@ $("#checkBtn").addEventListener("click", async () => {
 - If a question was not attempted, award 0 and leave studentAnswer empty.
 - Return one result for every question number in the key.
 - Feedback in Burmese, short and specific.`,
-      content: [...blocks, { type: "text", text: `Answer key (${items.length} questions, total ${paper.total} marks):\n\n${key}\n\nMark the student's answer sheet in the photos above.` }],
+      images: blocks,
+      text: `Answer key (${items.length} questions, total ${paper.total} marks):\n\n${key}\n\nMark the student's answer sheet in the photos above.`,
       schema: CHECK_SCHEMA,
       maxTokens: 64000,
     });
     renderResult(paper, items, res);
     setStatus(st, "✔ စစ်ပြီးပါပြီ — AI အမှတ်ပေးချက်ကို ဆရာ/ဆရာမ ပြန်လည်စစ်ဆေးပါ");
   } catch (e) {
-    setStatus(st, "✖ " + apiErrorText(e), true);
+    setStatus(st, "✖ " + errorText(e), true);
   } finally {
     btn.disabled = false;
   }
@@ -600,6 +783,7 @@ function renderResult(paper, items, res) {
 }
 
 // ---------- init ----------
+renderSettings();
 renderBank();
 renderSavedPapers();
 renderCheckPapers();
